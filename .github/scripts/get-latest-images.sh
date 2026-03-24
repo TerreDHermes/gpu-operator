@@ -32,7 +32,7 @@ fi
 case "${COMPONENT}" in
     toolkit)
         IMAGE_REPO="ghcr.io/nvidia/container-toolkit"
-        GITHUB_REPO="NVIDIA/container-toolkit"
+        GITHUB_REPO="NVIDIA/nvidia-container-toolkit"
         ;;
     device-plugin)
         IMAGE_REPO="ghcr.io/nvidia/k8s-device-plugin"
@@ -40,7 +40,7 @@ case "${COMPONENT}" in
         ;;
     mig-manager)
         IMAGE_REPO="ghcr.io/nvidia/k8s-mig-manager"
-        GITHUB_REPO="NVIDIA/k8s-mig-manager"
+        GITHUB_REPO="NVIDIA/mig-parted"
         ;;
     *)
         echo "Error: Unknown component '${COMPONENT}'" >&2
