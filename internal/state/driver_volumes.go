@@ -19,6 +19,7 @@ package state
 import (
 	"context"
 	"fmt"
+	"os"
 	"sort"
 
 	corev1 "k8s.io/api/core/v1"
@@ -137,6 +138,63 @@ func (s *stateDriver) getDriverAdditionalConfigs(ctx context.Context, cr *v1alph
 	logger := log.FromContext(ctx, "method", "getDriverAdditionalConfigs")
 
 	additionalCfgs := &additionalConfigs{}
+
+	// YUM-REPOS и KERNEL-HEADERS from ENV gpu-operator
+	// a. YUM repos ConfigMap
+	if yumReposCM := os.Getenv("YUM_REPOS_CONFIGMAP"); yumReposCM != "" {
+		mountPath := os.Getenv("YUM_REPOS_MOUNT_PATH")
+		if mountPath == "" {
+			mountPath = "/etc/yum.repos.d" // default
+		}
+
+		vol := corev1.Volume{
+			Name: "yum-repos",
+			VolumeSource: corev1.VolumeSource{
+				ConfigMap: &corev1.ConfigMapVolumeSource{
+					LocalObjectReference: corev1.LocalObjectReference{Name: yumReposCM},
+					DefaultMode:          func() *int32 { i := int32(256); return &i }(),
+				},
+			},
+		}
+		additionalCfgs.Volumes = append(additionalCfgs.Volumes, vol)
+
+		vm := corev1.VolumeMount{
+			Name:      "yum-repos",
+			MountPath: mountPath,
+			ReadOnly:  true,
+		}
+		additionalCfgs.VolumeMounts = append(additionalCfgs.VolumeMounts, vm)
+
+		logger.Info("Added yum-repos ConfigMap volume", "configmap", yumReposCM, "mountPath", mountPath)
+	}
+
+	// b. Kernel headers hostPath
+	if kernelHeadersPath := os.Getenv("KERNEL_HEADERS_HOST_PATH"); kernelHeadersPath != "" {
+		mountPath := os.Getenv("KERNEL_HEADERS_MOUNT_PATH")
+		if mountPath == "" {
+			mountPath = "/usr/src/kernels"
+		}
+
+		vol := corev1.Volume{
+			Name: "kernel-headers",
+			VolumeSource: corev1.VolumeSource{
+				HostPath: &corev1.HostPathVolumeSource{
+					Path: kernelHeadersPath,
+					Type: func() *corev1.HostPathType { t := corev1.HostPathDirectory; return &t }(),
+				},
+			},
+		}
+		additionalCfgs.Volumes = append(additionalCfgs.Volumes, vol)
+
+		vm := corev1.VolumeMount{
+			Name:      "kernel-headers",
+			MountPath: mountPath,
+			ReadOnly:  true,
+		}
+		additionalCfgs.VolumeMounts = append(additionalCfgs.VolumeMounts, vm)
+
+		logger.Info("Added kernel-headers hostPath volume", "hostPath", kernelHeadersPath, "mountPath", mountPath)
+	}
 
 	if !cr.Spec.UsePrecompiledDrivers() {
 		if cr.Spec.IsRepoConfigEnabled() {
