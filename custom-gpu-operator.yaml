@@ -1,0 +1,28 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: gpu-operator
+  namespace: gpu-operator
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: gpu-operator
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: gpu-operator
+    spec:
+      serviceAccountName: gpu-operator
+      containers:
+      - name: gpu-operator
+        image: nvcr.io/nvidia/cloud-native/gpu-operator:v25.10.0
+        env:
+        - name: YUM_REPOS_CONFIGMAP
+          value: "yum-repos"
+        - name: YUM_REPOS_MOUNT_PATH
+          value: "/etc/yum.repos.d"
+        - name: KERNEL_HEADERS_HOST_PATH
+          value: "/"
+        - name: KERNEL_HEADERS_MOUNT_PATH
+          value: "/host"

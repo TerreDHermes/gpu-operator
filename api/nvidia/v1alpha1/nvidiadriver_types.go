@@ -551,6 +551,10 @@ func (d *NVIDIADriverSpec) GetImagePath(osVersion string) (string, error) {
 		return "", fmt.Errorf("failed to get image path from crd: %w", err)
 	}
 
+
+	// 👈 ФИКС СЛЭША!
+    image = strings.TrimLeft(image, "/")  // Убираем ВЕДУЩИЙ слэш!
+
 	// if image digest is specified, use it directly
 	if !strings.Contains(image, "sha256:") {
 		// append '-<osVersion>' to the driver tag

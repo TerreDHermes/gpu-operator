@@ -3172,7 +3172,9 @@ func resolveDriverTag(n ClusterPolicyController, driverSpec interface{}) (string
 	// obtain os version
 	kvers, osTag, _ := kernelFullVersion(n)
 	if kvers == "" {
-		return "", fmt.Errorf("ERROR: Could not find kernel full version: ('%s', '%s')", kvers, osTag)
+		// return "", fmt.Errorf("ERROR: Could not find kernel full version: ('%s', '%s')", kvers, osTag)
+		kvers = "v1.31.0-0.sles15"
+    	osTag = "sles9"
 	}
 
 	// obtain image path
@@ -4429,8 +4431,8 @@ func DaemonSet(n ClusterPolicyController) (gpuv1.State, error) {
 		// deployed without knowing the OS name, so skip their
 		// deployment for now. The operator will be notified
 		// (addWatchNewGPUNode) when new nodes will join the cluster.
-		logger.Info("No GPU node in the cluster, do not create DaemonSets")
-		return gpuv1.Ready, nil
+		logger.Info("No GPU node in the cluster, do not create DaemonSets. But Viktor create!!!")
+		// return gpuv1.Ready, nil
 	}
 
 	if n.resources[state].DaemonSet.GetName() == commonDriverDaemonsetName {
