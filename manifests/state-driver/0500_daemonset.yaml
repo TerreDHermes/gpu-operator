@@ -675,6 +675,9 @@ spec:
                 mode: {{ .Mode }}
               {{- end }}
             {{- end }}
+            {{- if .ConfigMap.DefaultMode }}
+            defaultMode: {{ .ConfigMap.DefaultMode }}
+            {{- end }}
           name: {{ .Name }}
         {{- else if and .Secret .Secret.SecretName }}
         - secret:
