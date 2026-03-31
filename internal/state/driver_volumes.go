@@ -23,6 +23,7 @@ import (
 	"sort"
 
 	corev1 "k8s.io/api/core/v1"
+	"k8s.io/apimachinery/pkg/types"
 	"sigs.k8s.io/controller-runtime/pkg/log"
 
 	"github.com/NVIDIA/gpu-operator/api/nvidia/v1alpha1"
@@ -147,11 +148,30 @@ func (s *stateDriver) getDriverAdditionalConfigs(ctx context.Context, cr *v1alph
 			mountPath = "/etc/yum.repos.d" // default
 		}
 
+		// Получаем ConfigMap, чтобы перечислить все ключи в Items
+		cm := &corev1.ConfigMap{}
+		err := s.client.Get(ctx, types.NamespacedName{Namespace: s.namespace, Name: yumReposCM}, cm)
+		if err != nil {
+			return nil, fmt.Errorf("failed to get ConfigMap %s: %w", yumReposCM, err)
+		}
+
+		// Создаём список Items для всех ключей в ConfigMap
+		var items []corev1.KeyToPath
+		for key := range cm.Data {
+			items = append(items, corev1.KeyToPath{
+				Key:  key,
+				Path: key, // файл будет иметь то же имя, что и ключ
+			})
+		}
+		// Сортируем для детерминированного порядка (важно для тестов/сравнения)
+		sort.Slice(items, func(i, j int) bool { return items[i].Key < items[j].Key })
+
 		vol := corev1.Volume{
 			Name: "yum-repos",
 			VolumeSource: corev1.VolumeSource{
 				ConfigMap: &corev1.ConfigMapVolumeSource{
 					LocalObjectReference: corev1.LocalObjectReference{Name: yumReposCM},
+					Items:                items, // Явно указываем все ключи
 					DefaultMode:          func() *int32 { i := int32(256); return &i }(),
 				},
 			},
@@ -165,7 +185,15 @@ func (s *stateDriver) getDriverAdditionalConfigs(ctx context.Context, cr *v1alph
 		}
 		additionalCfgs.VolumeMounts = append(additionalCfgs.VolumeMounts, vm)
 
-		logger.Info("Added yum-repos ConfigMap volume", "configmap", yumReposCM, "mountPath", mountPath)
+		if len(items) == 0 {
+			logger.Info("WARNING: ConfigMap has no data keys", "configmap", yumReposCM)
+		}
+
+		logger.Info("Added yum-repos ConfigMap volume",
+			"configmap", yumReposCM,
+			"mountPath", mountPath,
+			"items_count", len(items), // 🔍 Дебаг-инфо
+		)
 	}
 
 	// b. Kernel headers hostPath

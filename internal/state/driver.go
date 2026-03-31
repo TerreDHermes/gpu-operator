@@ -18,7 +18,9 @@ package state
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
+	"os"
 	"path/filepath"
 	"regexp"
 	"sort"
@@ -226,8 +228,103 @@ func (s *stateDriver) cleanupStaleDriverDaemonsets(ctx context.Context, cr *nvid
 	return nil
 }
 
+// func (s *stateDriver) getManifestObjects(ctx context.Context, cr *nvidiav1alpha1.NVIDIADriver, infoCatalog InfoCatalog) ([]*unstructured.Unstructured, error) {
+// 	logger := log.FromContext(ctx)
+
+// 	info := infoCatalog.Get(InfoTypeClusterPolicyCR)
+// 	if info == nil {
+// 		return nil, fmt.Errorf("failed to get ClusterPolicy CR from info catalog")
+// 	}
+// 	clusterPolicy := info.(gpuv1.ClusterPolicy)
+
+// 	info = infoCatalog.Get(InfoTypeClusterInfo)
+// 	if info == nil {
+// 		return nil, fmt.Errorf("failed to get cluster info from info catalog")
+// 	}
+// 	clusterInfo := info.(clusterinfo.Interface)
+
+// 	runtimeSpec, err := getRuntimeSpec(ctx, s.client, s.namespace, clusterInfo, &cr.Spec)
+// 	if err != nil {
+// 		return nil, fmt.Errorf("failed to construct cluster runtime spec: %w", err)
+// 	}
+
+// 	gpuDirectRDMASpec := cr.Spec.GPUDirectRDMA
+
+// 	renderData := &driverRenderData{
+// 		GPUDirectRDMA: gpuDirectRDMASpec,
+// 		Runtime:       runtimeSpec,
+// 		HostRoot:      clusterPolicy.Spec.HostPaths.RootFS,
+// 	}
+
+// 	if len(runtimeSpec.NodePools) == 0 {
+// 		return nil, fmt.Errorf("no nodes matching the given node selector for %s", cr.Name)
+// 	}
+
+// 	// Render kubernetes objects for each node pool.
+// 	// We deploy one DaemonSet per node pool.
+// 	var objs []*unstructured.Unstructured
+// 	for _, nodePool := range runtimeSpec.NodePools {
+// 		// Construct a unique driver spec per node pool. Each node pool
+// 		// should have a unique nodeSelector and name.
+// 		driverSpec, err := getDriverSpec(cr, nodePool)
+// 		if err != nil {
+// 			return nil, fmt.Errorf("failed to construct driver spec: %w", err)
+// 		}
+// 		renderData.Driver = driverSpec
+
+// 		if cr.Spec.UsePrecompiledDrivers() {
+// 			renderData.Precompiled = &precompiledSpec{
+// 				KernelVersion:          nodePool.kernel,
+// 				SanitizedKernelVersion: getSanitizedKernelVersion(nodePool.kernel),
+// 			}
+// 		}
+
+// 		gdsSpec, err := getGDSSpec(&cr.Spec, nodePool)
+// 		if err != nil {
+// 			return nil, fmt.Errorf("failed to construct GDS spec: %w", err)
+// 		}
+// 		renderData.GDS = gdsSpec
+
+// 		gdrcopySpec, err := getGDRCopySpec(&cr.Spec, nodePool)
+// 		if err != nil {
+// 			return nil, fmt.Errorf("failed to construct GDRCopy spec: %w", err)
+// 		}
+// 		renderData.GDRCopy = gdrcopySpec
+
+// 		if !cr.Spec.UsePrecompiledDrivers() && runtimeSpec.OpenshiftDriverToolkitEnabled {
+// 			renderData.Openshift = &openshiftSpec{
+// 				RHCOSVersion: nodePool.rhcosVersion,
+// 				ToolkitImage: runtimeSpec.OpenshiftDriverToolkitImages[nodePool.rhcosVersion],
+// 			}
+// 		}
+
+// 		renderData.AdditionalConfigs, err = s.getDriverAdditionalConfigs(ctx, cr, clusterInfo, nodePool)
+// 		if err != nil {
+// 			logger.Error(err, "error rendering addition driver volume", "NodePool", nodePool.name)
+// 		}
+
+// 		logger.Info("Rendering manifests for node pool", "NodePool", nodePool.name)
+// 		manifestObjs, err := s.renderManifestObjects(ctx, renderData)
+// 		if err != nil {
+// 			logger.Error(err, "error rendering manifests for node pool", "NodePool", nodePool.name)
+// 			return nil, err
+// 		}
+// 		manifestObjs, err = s.handleDefaultImagesInObjects(ctx, manifestObjs, cr, *renderData)
+// 		if err != nil {
+// 			logger.Error(err, "error handling default images in manifests", "NodePool", nodePool.name)
+// 			return nil, err
+// 		}
+// 		objs = append(objs, manifestObjs...)
+
+// 	}
+// 	return objs, nil
+// }
+
+
+
 func (s *stateDriver) getManifestObjects(ctx context.Context, cr *nvidiav1alpha1.NVIDIADriver, infoCatalog InfoCatalog) ([]*unstructured.Unstructured, error) {
-	logger := log.FromContext(ctx)
+	// Используем .V(1) для дебаг-логов, чтобы они не засоряли продакшен
+	logger := log.FromContext(ctx).V(1)
 
 	info := infoCatalog.Get(InfoTypeClusterPolicyCR)
 	if info == nil {
@@ -296,9 +393,57 @@ func (s *stateDriver) getManifestObjects(ctx context.Context, cr *nvidiav1alpha1
 			}
 		}
 
+		// 🔍 DEBUG: Логируем ENV-переменные перед вызовом
+		logger.Info("DEBUG: Before getDriverAdditionalConfigs",
+			"NodePool", nodePool.name,
+			"YUM_REPOS_CONFIGMAP", os.Getenv("YUM_REPOS_CONFIGMAP"),
+			"YUM_REPOS_MOUNT_PATH", os.Getenv("YUM_REPOS_MOUNT_PATH"),
+			"KERNEL_HEADERS_HOST_PATH", os.Getenv("KERNEL_HEADERS_HOST_PATH"),
+			"KERNEL_HEADERS_MOUNT_PATH", os.Getenv("KERNEL_HEADERS_MOUNT_PATH"),
+		)
+
 		renderData.AdditionalConfigs, err = s.getDriverAdditionalConfigs(ctx, cr, clusterInfo, nodePool)
 		if err != nil {
 			logger.Error(err, "error rendering addition driver volume", "NodePool", nodePool.name)
+		}
+
+		// 🔍 DEBUG: Логируем результат получения конфигов
+		if renderData.AdditionalConfigs != nil {
+			logger.Info("DEBUG: AdditionalConfigs received",
+				"NodePool", nodePool.name,
+				"volumes_count", len(renderData.AdditionalConfigs.Volumes),
+				"volumeMounts_count", len(renderData.AdditionalConfigs.VolumeMounts),
+			)
+			// Логируем каждый volume
+			for i, vol := range renderData.AdditionalConfigs.Volumes {
+				volType := "unknown"
+				if vol.ConfigMap != nil {
+					volType = fmt.Sprintf("ConfigMap/%s", vol.ConfigMap.Name)
+				} else if vol.Secret != nil {
+					volType = fmt.Sprintf("Secret/%s", vol.Secret.SecretName)
+				} else if vol.HostPath != nil {
+					volType = fmt.Sprintf("HostPath/%s", vol.HostPath.Path)
+				}
+				logger.Info("DEBUG: Volume details",
+					"index", i,
+					"name", vol.Name,
+					"type", volType,
+					"has_items", vol.ConfigMap != nil && len(vol.ConfigMap.Items) > 0,
+					"default_mode", vol.ConfigMap != nil && vol.ConfigMap.DefaultMode != nil,
+				)
+			}
+			// Логируем каждый volumeMount
+			for i, vm := range renderData.AdditionalConfigs.VolumeMounts {
+				logger.Info("DEBUG: VolumeMount details",
+					"index", i,
+					"name", vm.Name,
+					"mountPath", vm.MountPath,
+					"readOnly", vm.ReadOnly,
+					"subPath", vm.SubPath,
+				)
+			}
+		} else {
+			logger.Info("DEBUG: AdditionalConfigs is nil", "NodePool", nodePool.name)
 		}
 
 		logger.Info("Rendering manifests for node pool", "NodePool", nodePool.name)
@@ -307,16 +452,159 @@ func (s *stateDriver) getManifestObjects(ctx context.Context, cr *nvidiav1alpha1
 			logger.Error(err, "error rendering manifests for node pool", "NodePool", nodePool.name)
 			return nil, err
 		}
+
+		// 👈 ТВОЙ DEBUG ПАТЧ!
+		if len(manifestObjs) > 0 {
+			// 👈 DEBUG: Сохрани РЕНДЕРЕННЫЙ DaemonSet в ConfigMap!
+			for _, obj := range manifestObjs {
+				if obj.GetKind() == "DaemonSet" {
+					// Конвертируем Unstructured → JSON → string
+					jsonBytes, err := json.MarshalIndent(obj.Object, "", "  ")
+					if err != nil {
+						logger.Error(err, "Failed to marshal DaemonSet")
+						continue
+					}
+					//yamlStr := string(jsonBytes) // Пока JSON, потом конверт если нужно
+
+					logger.Info("SAVING RENDERED DaemonSet", "name", obj.GetName())
+
+					// Создай ConfigMap с рендером
+					cm := &corev1.ConfigMap{
+						ObjectMeta: metav1.ObjectMeta{
+							Name:      "debug-rendered-daemonset-" + obj.GetName(),
+							Namespace: s.namespace,
+							Labels: map[string]string{
+								"debug": "rendered-daemonset",
+								"pool":  nodePool.name,
+							},
+						},
+						Data: map[string]string{
+							"daemonset.json": string(jsonBytes),
+							"name":           obj.GetName(),
+							"kind":           obj.GetKind(),
+						},
+					}
+
+					if err := s.client.Create(ctx, cm); err != nil {
+						logger.Error(err, "Failed to save rendered DaemonSet")
+					} else {
+						logger.Info("✅ RENDERED DaemonSet SAVED",
+							"configmap", cm.Name,
+							"size", len(jsonBytes),
+							"nodepool", nodePool.name)
+					}
+					break // Только первый DaemonSet
+				}
+			}
+		}
+
+		// 🔍 DEBUG: Анализируем сгенерированный DaemonSet
+		for _, obj := range manifestObjs {
+			if obj.GetKind() == "DaemonSet" {
+				// Извлекаем spec.template.spec из unstructured
+				spec, ok := obj.Object["spec"].(map[string]interface{})
+				if !ok {
+					logger.Info("DEBUG: Failed to cast spec to map", "ds_name", obj.GetName())
+					continue
+				}
+				template, ok := spec["template"].(map[string]interface{})
+				if !ok {
+					logger.Info("DEBUG: Failed to cast template to map", "ds_name", obj.GetName())
+					continue
+				}
+				podSpec, ok := template["spec"].(map[string]interface{})
+				if !ok {
+					logger.Info("DEBUG: Failed to cast podSpec to map", "ds_name", obj.GetName())
+					continue
+				}
+
+				// Считаем volumes
+				volumesRaw, _ := podSpec["volumes"].([]interface{})
+				volumeNames := make([]string, 0, len(volumesRaw))
+				for _, v := range volumesRaw {
+					if vm, ok := v.(map[string]interface{}); ok {
+						if name, ok := vm["name"].(string); ok {
+							volumeNames = append(volumeNames, name)
+						}
+					}
+				}
+
+				// Считаем volumeMounts в контейнерах
+				containersRaw, _ := podSpec["containers"].([]interface{})
+				volumeMountNames := make(map[string][]string) // container -> [mount names]
+				for _, cRaw := range containersRaw {
+					if c, ok := cRaw.(map[string]interface{}); ok {
+						if name, ok := c["name"].(string); ok {
+							if mountsRaw, ok := c["volumeMounts"].([]interface{}); ok {
+								for _, m := range mountsRaw {
+									if vm, ok := m.(map[string]interface{}); ok {
+										if mName, ok := vm["name"].(string); ok {
+											volumeMountNames[name] = append(volumeMountNames[name], mName)
+										}
+									}
+								}
+							}
+						}
+					}
+				}
+
+				// 🔥 Ключевая проверка: есть ли "yum-repos" в volumes?
+				yumReposInVolumes := containsString(volumeNames, "yum-repos")
+				yumReposInMounts := hasYumReposMount(volumeMountNames)
+
+				logger.Info("DEBUG: Rendered DaemonSet validation",
+					"ds_name", obj.GetName(),
+					"volumes_count", len(volumeNames),
+					"volumes_list", volumeNames,
+					"volume_mounts_by_container", volumeMountNames,
+					"yum_repos_in_volumes", yumReposInVolumes,
+					"yum_repos_in_mounts", yumReposInMounts,
+					"validation_status", func() string {
+						if yumReposInMounts && !yumReposInVolumes {
+							return "❌ BUG: volumeMount exists but volume is MISSING"
+						}
+						if !yumReposInMounts && !yumReposInVolumes {
+							return "⚠️  INFO: yum-repos not used (check ENV vars)"
+						}
+						return "✅ OK: volume and mount are consistent"
+					}(),
+				)
+			}
+		}
+
 		manifestObjs, err = s.handleDefaultImagesInObjects(ctx, manifestObjs, cr, *renderData)
 		if err != nil {
 			logger.Error(err, "error handling default images in manifests", "NodePool", nodePool.name)
 			return nil, err
 		}
 		objs = append(objs, manifestObjs...)
-
 	}
 	return objs, nil
 }
+ 
+// containsString checks if a string is present in a slice
+func containsString(slice []string, s string) bool {
+	for _, item := range slice {
+		if item == s {
+			return true
+		}
+	}
+	return false
+}
+
+// hasYumReposMount checks if any container has a volumeMount named "yum-repos"
+func hasYumReposMount(mounts map[string][]string) bool {
+	for _, names := range mounts {
+		for _, name := range names {
+			if name == "yum-repos" {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+
 
 func (s *stateDriver) renderManifestObjects(ctx context.Context, renderData *driverRenderData) ([]*unstructured.Unstructured, error) {
 	logger := log.FromContext(ctx)
